@@ -44,14 +44,23 @@
 
 using namespace ns3;
 
+static void
+SetPosition (Ptr<Node> node, double x)
+{
+  Ptr<MobilityModel> mobility = node->GetObject<MobilityModel> ();
+  Vector pos = mobility->GetPosition();
+  pos.x = x;
+  mobility->SetPosition(pos);
+}
 NS_LOG_COMPONENT_DEFINE ("ThirdScriptExample");
 
 int 
 main (int argc, char *argv[])
 {
-    uint32_t maxBytes = 0;
+    uint32_t maxBytes = 1024;
     //uint32_t nCsma = 1; //only  n2  exist
-    uint32_t nWifi = 1 ;
+    uint32_t nWifi = 1;
+    std::string phyMode ("DsssRate1Mbps");
 
     // Check for valid number of csma or wifi nodes
     // 250 should be enough, otherwise IP addresses
@@ -62,58 +71,74 @@ main (int argc, char *argv[])
         return 1;
     }
 
+    LogComponentEnable ("PacketSink", LOG_LEVEL_ALL);
+
     NodeContainer AP_FTP_Nodes;
     AP_FTP_Nodes.Create (2);
-
-    PointToPointHelper pointToPoint;
-    pointToPoint.SetDeviceAttribute ("DataRate", StringValue ("5Mbps"));
-    pointToPoint.SetChannelAttribute ("Delay", StringValue ("2ms"));
-
-    //    NetDeviceContainer p2pDevices;
-    //    p2pDevices = pointToPoint.Install (AP_FTP_Nodes);
 
     NodeContainer wifiStaNodes;
     wifiStaNodes.Create (nWifi);
     NodeContainer wifiApNode = AP_FTP_Nodes.Get (0);
 
-    YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
-    YansWifiPhyHelper phy = YansWifiPhyHelper::Default ();
-    phy.SetChannel (channel.Create ());
-
+    // Set up WiFi
     WifiHelper wifi;
-    wifi.SetRemoteStationManager ("ns3::AarfWifiManager");
 
-    WifiMacHelper mac;
-    Ssid ssid = Ssid ("ns-3-ssid");
-    mac.SetType ("ns3::StaWifiMac",
-            "Ssid", SsidValue (ssid),
-            "ActiveProbing", BooleanValue (false));
+    YansWifiPhyHelper wifiPhy =  YansWifiPhyHelper::Default ();
+    wifiPhy.SetPcapDataLinkType (YansWifiPhyHelper::DLT_IEEE802_11);
+
+    YansWifiChannelHelper wifiChannel ;
+    wifiChannel.SetPropagationDelay ("ns3::ConstantSpeedPropagationDelayModel");
+    wifiChannel.AddPropagationLoss ("ns3::TwoRayGroundPropagationLossModel",
+                                      "SystemLoss", DoubleValue(1),
+                                      "HeightAboveZ", DoubleValue(1.5));
+
+    // For range near 250m
+    wifiPhy.Set ("TxPowerStart", DoubleValue(33));
+    wifiPhy.Set ("TxPowerEnd", DoubleValue(33));
+    wifiPhy.Set ("TxPowerLevels", UintegerValue(1));
+    wifiPhy.Set ("TxGain", DoubleValue(0));
+    wifiPhy.Set ("RxGain", DoubleValue(0));
+    wifiPhy.Set ("EnergyDetectionThreshold", DoubleValue(-61.8));
+    wifiPhy.Set ("CcaMode1Threshold", DoubleValue(-64.8));
+
+    wifiPhy.SetChannel (wifiChannel.Create ());
+
+    // Add a non-QoS upper mac
+    NqosWifiMacHelper wifiMac = NqosWifiMacHelper::Default ();
+    wifiMac.SetType ("ns3::AdhocWifiMac");
+
+    // Set 802.11b standard
+    wifi.SetStandard (WIFI_PHY_STANDARD_80211b);
+
+    wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
+                                  "DataMode",StringValue(phyMode),
+                                  "ControlMode",StringValue(phyMode));
 
     NetDeviceContainer staDevices;
-    staDevices = wifi.Install (phy, mac, wifiStaNodes);
+    staDevices = wifi.Install (wifiPhy, wifiMac, wifiStaNodes);
 
-    mac.SetType ("ns3::ApWifiMac",
-            "Ssid", SsidValue (ssid));
 
     NetDeviceContainer apDevices;
-    apDevices = wifi.Install (phy, mac, wifiApNode);
+    apDevices = wifi.Install (wifiPhy, wifiMac, wifiApNode);
 
     MobilityHelper mobility;
-
-    mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
-            "MinX", DoubleValue (0.0),
-            "MinY", DoubleValue (0.0),
-            "DeltaX", DoubleValue (5.0),
-            "DeltaY", DoubleValue (10.0),
-            "GridWidth", UintegerValue (3),
-            "LayoutType", StringValue ("RowFirst"));
-
-    mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
-            "Bounds", RectangleValue (Rectangle (-50, 50, -50, 50)));
-    mobility.Install (wifiStaNodes);
-
     mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
     mobility.Install (wifiApNode);
+
+    MobilityHelper mobilityUser;
+    Ptr<ListPositionAllocator> positionAlloc = CreateObject <ListPositionAllocator>();
+    positionAlloc ->Add(Vector(1000000000, 0, 0)); // node1 -- starting very far away
+    mobilityUser.SetPositionAllocator(positionAlloc);
+    mobilityUser.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    mobilityUser.Install(wifiStaNodes);
+
+
+    // node 1 comes in the communication range of both
+    Simulator::Schedule (Seconds (4.0), &SetPosition, wifiStaNodes.Get (0), 200.0);
+
+    // node 1 goes out of the communication range of both
+    Simulator::Schedule (Seconds (7.0), &SetPosition, wifiStaNodes.Get (0), 1000.0);
+
 
     //////////////////TOP LAN////////////////////
     Ptr<Node> n2 = CreateObject<Node> ();//acts as a router
@@ -123,7 +148,7 @@ main (int argc, char *argv[])
     Ptr<Node> bridge2 = CreateObject<Node> ();
 
     CsmaHelper csma;
-    csma.SetChannelAttribute ("DataRate", StringValue ("1Mbps"));
+    csma.SetChannelAttribute ("DataRate", StringValue ("5Mbps"));
     csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (2)));
 
     NetDeviceContainer topLanDevices;
@@ -152,9 +177,7 @@ main (int argc, char *argv[])
 
 //TODO change here, add
     InternetStackHelper stack;
-    //stack.Install (csmaNodes);
     stack.Install (AP_FTP_Nodes);
-    //stack.Install (wifiApNode);
     stack.Install (wifiStaNodes);
     stack.Install(n2);
 
