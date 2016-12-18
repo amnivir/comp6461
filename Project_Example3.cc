@@ -28,6 +28,7 @@
 #include "ns3/propagation-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/flow-monitor-module.h"
+#include "ns3/bridge-module.h"
 // Default Network Topology
 //
 // Number of wifi or csma nodes can be increased up to 250
@@ -49,18 +50,8 @@ int
 main (int argc, char *argv[])
 {
     uint32_t maxBytes = 0;
-    bool verbose = true;
     //uint32_t nCsma = 1; //only  n2  exist
-    uint32_t nWifi = 3;
-    bool tracing = false;
-
-    CommandLine cmd;
-    //cmd.AddValue ("nCsma", "Number of \"extra\" CSMA nodes/devices", nCsma);
-    cmd.AddValue ("nWifi", "Number of wifi STA devices", nWifi);
-    cmd.AddValue ("verbose", "Tell echo applications to log if true", verbose);
-    cmd.AddValue ("tracing", "Enable pcap tracing", tracing);
-
-    cmd.Parse (argc,argv);
+    uint32_t nWifi = 1 ;
 
     // Check for valid number of csma or wifi nodes
     // 250 should be enough, otherwise IP addresses
@@ -71,36 +62,19 @@ main (int argc, char *argv[])
         return 1;
     }
 
-    if (verbose)
-    {
-        //LogComponentEnable ("FTPApplication", LOG_LEVEL_INFO);
-        //LogComponentEnable ("UdpEchoServerApplication", LOG_LEVEL_INFO);
-    }
-
-    NodeContainer p2pNodes;
-    p2pNodes.Create (2);
+    NodeContainer AP_FTP_Nodes;
+    AP_FTP_Nodes.Create (2);
 
     PointToPointHelper pointToPoint;
     pointToPoint.SetDeviceAttribute ("DataRate", StringValue ("5Mbps"));
     pointToPoint.SetChannelAttribute ("Delay", StringValue ("2ms"));
 
-    NetDeviceContainer p2pDevices;
-    p2pDevices = pointToPoint.Install (p2pNodes);
-
-    //    NodeContainer csmaNodes;
-    //    csmaNodes.Add (p2pNodes.Get (1));
-    //    csmaNodes.Create (nCsma);
-
-    //    CsmaHelper csma;
-    //    csma.SetChannelAttribute ("DataRate", StringValue ("10Mbps"));
-    //    csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (6560)));
-    //
-    //    NetDeviceContainer csmaDevices;
-    //    csmaDevices = csma.Install (csmaNodes);
+    //    NetDeviceContainer p2pDevices;
+    //    p2pDevices = pointToPoint.Install (AP_FTP_Nodes);
 
     NodeContainer wifiStaNodes;
     wifiStaNodes.Create (nWifi);
-    NodeContainer wifiApNode = p2pNodes.Get (0);
+    NodeContainer wifiApNode = AP_FTP_Nodes.Get (0);
 
     YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
     YansWifiPhyHelper phy = YansWifiPhyHelper::Default ();
@@ -141,42 +115,89 @@ main (int argc, char *argv[])
     mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
     mobility.Install (wifiApNode);
 
+    //////////////////TOP LAN////////////////////
+    Ptr<Node> n2 = CreateObject<Node> ();//acts as a router
+
+
+    Ptr<Node> bridge1 = CreateObject<Node> ();
+    Ptr<Node> bridge2 = CreateObject<Node> ();
+
+    CsmaHelper csma;
+    csma.SetChannelAttribute ("DataRate", StringValue ("1Mbps"));
+    csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (2)));
+
+    NetDeviceContainer topLanDevices;
+    NetDeviceContainer topBridgeDevices;
+    // It is easier to iterate the nodes in C++ if we put them into a container
+    NodeContainer topLan (n2);
+    topLan.Add(AP_FTP_Nodes.Get(0));
+    topLan.Add(wifiStaNodes);
+
+
+    for (uint32_t i = 0; i < (nWifi+2); i++)
+      {
+        // install a csma channel between the ith toplan node and the bridge node
+        NetDeviceContainer link = csma.Install (NodeContainer (topLan.Get (i), bridge1));
+        topLanDevices.Add (link.Get (0));
+        topBridgeDevices.Add (link.Get (1));
+      }
+
+    //
+    // Now, Create the bridge netdevice, which will do the packet switching.  The
+    // bridge lives on the node bridge1 and bridges together the topBridgeDevices
+    // which are the three CSMA net devices on the node in the diagram above.
+    //
+    BridgeHelper bridge;
+    bridge.Install (bridge1, topBridgeDevices);
+
+//TODO change here, add
     InternetStackHelper stack;
     //stack.Install (csmaNodes);
-    stack.Install (p2pNodes.Get(1));
-    stack.Install (wifiApNode);
+    stack.Install (AP_FTP_Nodes);
+    //stack.Install (wifiApNode);
     stack.Install (wifiStaNodes);
+    stack.Install(n2);
+
+
+
+/////////////BOTTOM LAN??????????????
+    NetDeviceContainer bottomLanDevices;
+    NetDeviceContainer bottomBridgeDevices;
+    NodeContainer bottomLan (n2);
+    bottomLan.Add(AP_FTP_Nodes.Get(1));
+    for (int i = 0; i < 2; i++)
+      {
+        NetDeviceContainer link = csma.Install (NodeContainer (bottomLan.Get (i), bridge2));
+        bottomLanDevices.Add (link.Get (0));
+        bottomBridgeDevices.Add (link.Get (1));
+      }
+    bridge.Install (bridge2, bottomBridgeDevices);
 
     Ipv4AddressHelper address;
-
     address.SetBase ("10.1.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer p2pInterfaces;
-    p2pInterfaces = address.Assign (p2pDevices);
-
-    //    address.SetBase ("10.1.2.0", "255.255.255.0");
-    //    Ipv4InterfaceContainer csmaInterfaces;
-    //    csmaInterfaces = address.Assign (csmaDevices);
+    Ipv4InterfaceContainer APInterfaces;
+    APInterfaces = address.Assign (topLanDevices);
 
     address.SetBase ("10.1.3.0", "255.255.255.0");
-    Ipv4InterfaceContainer wifiInterfaces;
-    wifiInterfaces = address.Assign (staDevices);
-    address.Assign (apDevices);
+    Ipv4InterfaceContainer bottomInterfaces;
+    bottomInterfaces = address.Assign (bottomLanDevices);
+    //address.Assign (apDevices);
 
     //
     // Create a BulkSendApplication and install it on node 0, FTP TCP server
     //      //
     uint16_t port = 9;  // well-known echo port number
-    std::cout<<"FTP_SERVER_IP: "<<p2pInterfaces.GetAddress(1)<<"\n";
+    std::cout<<"FTP_SERVER_IP: "<<bottomInterfaces.GetAddress(1)<<"\n";
     for(uint32_t i=0;i<nWifi;i++)
     {
-        BulkSendHelper source("ns3::TcpSocketFactory", InetSocketAddress(wifiInterfaces.GetAddress(i), port));
+        BulkSendHelper source("ns3::TcpSocketFactory", InetSocketAddress(APInterfaces.GetAddress(i+2), port));
         // Set the amount of data to send in bytes.  Zero is unlimited.
         source.SetAttribute("MaxBytes", UintegerValue(maxBytes));
-        ApplicationContainer sourceApps = source.Install(p2pNodes.Get(1));
+        ApplicationContainer sourceApps = source.Install(AP_FTP_Nodes.Get(1));
         sourceApps.Start(Seconds(0.0));
         sourceApps.Stop(Seconds(10.0));
 
-        std::cout<<"CLIENT_IP: "<<wifiInterfaces.GetAddress(i)<<"\n";
+        std::cout<<"CLIENT_IP: "<<APInterfaces.GetAddress(i+2)<<"\n";
         PacketSinkHelper sink("ns3::TcpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
         ApplicationContainer sinkApps = sink.Install(wifiStaNodes.Get(i));
         sinkApps.Start(Seconds(0.0));
@@ -189,14 +210,6 @@ main (int argc, char *argv[])
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
     Simulator::Stop (Seconds (10.0));
-
-    //    if (tracing == true)
-    //    {
-    //        pointToPoint.EnablePcapAll ("third");
-    //        phy.EnablePcap ("third", apDevices.Get (0));
-    //        csma.EnablePcap ("third", csmaDevices.Get (0), true);
-    //    }
-
     Simulator::Run ();
 
     // 10. Print per flow statistics
