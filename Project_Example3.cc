@@ -39,15 +39,16 @@
 //   Wifi 10.1.3.0
 //                 AP<--------No. of access points can be changed between 1-15 : check nWifi
 //  *    *    *    *
-//  |    |    |    |   10.1.1.0
-// n4   n3   n2   n0 ------SW1----SW2---- n1  <-----ftp server
-//                   CSMA
+//  |    |    |    |    10.1.1.0
+// n4   n3   n2   n0 ------SWITCH_1-------- n1  <-----ftp server
+//                   ...CSMA
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("ThirdScriptExample");
+NS_LOG_COMPONENT_DEFINE ("ThirdScriptExample");
 
-int main(int argc, char *argv[])
+int
+main (int argc, char *argv[])
 {
     uint32_t maxBytes = 0;
     bool verbose = true;
@@ -57,150 +58,139 @@ int main(int argc, char *argv[])
 
     CommandLine cmd;
     //cmd.AddValue ("nCsma", "Number of \"extra\" CSMA nodes/devices", nCsma);
-    cmd.AddValue("nWifi", "Number of wifi STA devices", nWifi);
-    cmd.AddValue("verbose", "Tell echo applications to log if true", verbose);
-    cmd.AddValue("tracing", "Enable pcap tracing", tracing);
+    cmd.AddValue ("nWifi", "Number of wifi STA devices", nWifi);
+    cmd.AddValue ("verbose", "Tell echo applications to log if true", verbose);
+    cmd.AddValue ("tracing", "Enable pcap tracing", tracing);
 
-    cmd.Parse(argc, argv);
+    cmd.Parse (argc,argv);
 
     // Check for valid number of csma or wifi nodes
     // 250 should be enough, otherwise IP addresses
     // soon become an issue
-    if (nWifi > 15)
+    if (nWifi > 15 )
     {
         std::cout << "Too many wifi or csma nodes, no more than 250 each." << std::endl;
         return 1;
     }
 
     NodeContainer csmaNodes;
-    csmaNodes.Create(2);
+    csmaNodes.Create (2);
 
     //SWITCH
     NodeContainer csmaSwitch;
-    csmaSwitch.Create(2);
-
-    PointToPointHelper pointToPointSwitches;
-    pointToPointSwitches.SetDeviceAttribute("DataRate", StringValue("5Mbps"));
-    pointToPointSwitches.SetChannelAttribute("Delay", StringValue("2ms"));
+    csmaSwitch.Create (2);
 
     CsmaHelper csma;
-    csma.SetChannelAttribute("DataRate", DataRateValue(5000000));
-    csma.SetChannelAttribute("Delay", TimeValue(MilliSeconds(2)));
+    csma.SetChannelAttribute ("DataRate", DataRateValue (5000000));
+    csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (2)));
 
-    NetDeviceContainer p2pSwitches;
-    //p2pSwitches = pointToPointSwitches.Install(csmaSwitch);
-    p2pSwitches=csma.Install(csmaSwitch);
     NetDeviceContainer csmaDevices;
     //csmaDevices = csma.Install (csmaNodes);
 
-    NetDeviceContainer switchDevices1;
-    NetDeviceContainer switchDevices2;
+    NetDeviceContainer switchDevices;
 
-    //for (int i = 0; i < 2; i++)
-
-    NetDeviceContainer link = csma.Install(NodeContainer(csmaNodes.Get(0), csmaSwitch.Get(0)));
-    csmaDevices.Add(link.Get(0));
-    switchDevices1.Add(link.Get(1));
-
-    link = csma.Install(NodeContainer(csmaNodes.Get(1), csmaSwitch.Get(1)));
-    csmaDevices.Add(link.Get(0));
-    switchDevices2.Add(link.Get(1));
-
+    for (int i = 0; i < 2; i++)
+      {
+        NetDeviceContainer link = csma.Install (NodeContainer (csmaNodes.Get (i), csmaSwitch.Get(0)));
+        csmaDevices.Add (link.Get (0));
+        switchDevices.Add (link.Get (1));
+      }
     // Create the bridge netdevice, which will do the packet switching
-    Ptr<Node> switchNode = csmaSwitch.Get(0);
-    BridgeHelper bridge1;
-    bridge1.Install(switchNode, switchDevices1);
-
-    Ptr<Node> switchNode2 = csmaSwitch.Get(1);
-    BridgeHelper bridge2;
-    bridge2.Install(switchNode2, switchDevices2);
+    Ptr<Node> switchNode = csmaSwitch.Get (0);
+    BridgeHelper bridge;
+    bridge.Install (switchNode, switchDevices);
 
     NodeContainer wifiStaNodes;
-    wifiStaNodes.Create(nWifi);
-    NodeContainer wifiApNode = csmaNodes.Get(0);
+    wifiStaNodes.Create (nWifi);
+    NodeContainer wifiApNode = csmaNodes.Get (0);
 
-    YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
-    YansWifiPhyHelper phy = YansWifiPhyHelper::Default();
-    phy.SetChannel(channel.Create());
+    YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
+    YansWifiPhyHelper phy = YansWifiPhyHelper::Default ();
+    phy.SetChannel (channel.Create ());
 
     WifiHelper wifi;
-    wifi.SetRemoteStationManager("ns3::AarfWifiManager");
+    wifi.SetRemoteStationManager ("ns3::AarfWifiManager");
 
     WifiMacHelper mac;
-    Ssid ssid = Ssid("ns-3-ssid");
-    mac.SetType("ns3::StaWifiMac", "Ssid", SsidValue(ssid), "ActiveProbing", BooleanValue(false));
+    Ssid ssid = Ssid ("ns-3-ssid");
+    mac.SetType ("ns3::StaWifiMac",
+            "Ssid", SsidValue (ssid),
+            "ActiveProbing", BooleanValue (false));
 
     NetDeviceContainer staDevices;
-    staDevices = wifi.Install(phy, mac, wifiStaNodes);
+    staDevices = wifi.Install (phy, mac, wifiStaNodes);
 
-    mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
+    mac.SetType ("ns3::ApWifiMac",
+            "Ssid", SsidValue (ssid));
 
     NetDeviceContainer apDevices;
-    apDevices = wifi.Install(phy, mac, wifiApNode);
+    apDevices = wifi.Install (phy, mac, wifiApNode);
 
     MobilityHelper mobility;
 
-    mobility.SetPositionAllocator("ns3::GridPositionAllocator", "MinX", DoubleValue(0.0), "MinY",
-            DoubleValue(0.0), "DeltaX", DoubleValue(5.0), "DeltaY", DoubleValue(10.0), "GridWidth",
-            UintegerValue(3), "LayoutType", StringValue("RowFirst"));
+    mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
+            "MinX", DoubleValue (0.0),
+            "MinY", DoubleValue (0.0),
+            "DeltaX", DoubleValue (5.0),
+            "DeltaY", DoubleValue (10.0),
+            "GridWidth", UintegerValue (3),
+            "LayoutType", StringValue ("RowFirst"));
 
-    mobility.SetMobilityModel("ns3::RandomWalk2dMobilityModel", "Bounds",
-            RectangleValue(Rectangle(-50, 50, -50, 50)));
-    mobility.Install(wifiStaNodes);
+    mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
+            "Bounds", RectangleValue (Rectangle (-50, 50, -50, 50)));
+    mobility.Install (wifiStaNodes);
 
-    mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    mobility.Install(wifiApNode);
+    mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+    mobility.Install (wifiApNode);
 
     InternetStackHelper stack;
-    stack.Install(csmaSwitch);
-    stack.Install(csmaNodes.Get(1));
-    stack.Install(wifiApNode);
-    stack.Install(wifiStaNodes);
+    stack.Install (csmaSwitch);
+    stack.Install (csmaNodes.Get(1));
+    stack.Install (wifiApNode);
+    stack.Install (wifiStaNodes);
 
     Ipv4AddressHelper address;
 
-    address.SetBase("10.1.1.0", "255.255.255.0");
+    address.SetBase ("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer p2pInterfaces;
-    p2pInterfaces = address.Assign(csmaDevices);
+    p2pInterfaces = address.Assign (csmaDevices);
 
     //    address.SetBase ("10.1.2.0", "255.255.255.0");
     //    Ipv4InterfaceContainer csmaInterfaces;
     //    csmaInterfaces = address.Assign (csmaDevices);
 
-    address.SetBase("10.1.3.0", "255.255.255.0");
+    address.SetBase ("10.1.3.0", "255.255.255.0");
     Ipv4InterfaceContainer wifiInterfaces;
-    wifiInterfaces = address.Assign(staDevices);
-    address.Assign(apDevices);
+    wifiInterfaces = address.Assign (staDevices);
+    address.Assign (apDevices);
 
     //
     // Create a BulkSendApplication and install it on node 0, FTP TCP server
     //      //
     uint16_t port = 9;  // well-known echo port number
-    std::cout << "FTP_SERVER_IP: " << p2pInterfaces.GetAddress(1) << "\n";
-    for (uint32_t i = 0; i < nWifi; i++)
+    std::cout<<"FTP_SERVER_IP: "<<p2pInterfaces.GetAddress(1)<<"\n";
+    for(uint32_t i=0;i<nWifi;i++)
     {
-        BulkSendHelper source("ns3::TcpSocketFactory",
-                InetSocketAddress(wifiInterfaces.GetAddress(i), port));
+        BulkSendHelper source("ns3::TcpSocketFactory", InetSocketAddress(wifiInterfaces.GetAddress(i), port));
         // Set the amount of data to send in bytes.  Zero is unlimited.
         source.SetAttribute("MaxBytes", UintegerValue(maxBytes));
         ApplicationContainer sourceApps = source.Install(csmaNodes.Get(1));
         sourceApps.Start(Seconds(0.0));
         sourceApps.Stop(Seconds(10.0));
 
-        std::cout << "CLIENT_IP: " << wifiInterfaces.GetAddress(i) << "\n";
-        PacketSinkHelper sink("ns3::TcpSocketFactory",
-                InetSocketAddress(Ipv4Address::GetAny(), port));
+        std::cout<<"CLIENT_IP: "<<wifiInterfaces.GetAddress(i)<<"\n";
+        PacketSinkHelper sink("ns3::TcpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
         ApplicationContainer sinkApps = sink.Install(wifiStaNodes.Get(i));
         sinkApps.Start(Seconds(0.0));
         sinkApps.Stop(Seconds(10.0));
     }
 
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+    Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
 
     // Install FlowMonitor on all nodes
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
-    Simulator::Stop(Seconds(10.0));
+    Simulator::Stop (Seconds (10.0));
 
     //    if (tracing == true)
     //    {
@@ -209,7 +199,7 @@ int main(int argc, char *argv[])
     //        csma.EnablePcap ("third", csmaDevices.Get (0), true);
     //    }
 
-    Simulator::Run();
+    Simulator::Run ();
 
     // 10. Print per flow statistics
     monitor->CheckForLostPackets();
@@ -223,16 +213,17 @@ int main(int argc, char *argv[])
                 << t.destinationAddress << ")\n";
         std::cout << "  Tx Packets: " << i->second.txPackets << "\n";
         std::cout << "  Tx Bytes:   " << i->second.txBytes << "\n";
-        std::cout << "  TxOffered:  " << i->second.txBytes * 8.0 / 10.0 / 1000 / 1000 << " Mbps\n";
+        std::cout << "  TxOffered:  " << i->second.txBytes * 8.0 / 10.0 / 1000 / 1000
+                << " Mbps\n";
         std::cout << "  Rx Packets: " << i->second.rxPackets << "\n";
         std::cout << "  Rx Bytes:   " << i->second.rxBytes << "\n";
         std::cout << "  Throughput: "
                 << i->second.rxBytes * 8.0
-                        / (i->second.timeLastRxPacket.GetSeconds()
-                                - i->second.timeFirstRxPacket.GetSeconds()) / 1024 << " Kbps \n";
-        std::cout << "  Delay:      " << i->second.delaySum / i->second.rxPackets << "\n";
+                / (i->second.timeLastRxPacket.GetSeconds()
+                        - i->second.timeFirstRxPacket.GetSeconds()) / 1024 << " Kbps \n";
+        std::cout << "  Delay:      " << i->second.delaySum / i->second.rxPackets  <<"\n";
     }
     monitor->SerializeToXmlFile("Project6461.xml", true, true);
-    Simulator::Destroy();
+    Simulator::Destroy ();
     return 0;
 }
