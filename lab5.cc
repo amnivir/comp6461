@@ -101,37 +101,40 @@ main (int argc, char *argv[])
     NodeContainer wifiStaNodes, wifiApNode;
 
     wifiStaNodes.Create (nWifi);
-    wifiApNode.Create(1);
+    wifiApNode.Create(2);
     // 2. Create channel for communication
     YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
     YansWifiPhyHelper phy = YansWifiPhyHelper::Default ();
     phy.SetChannel (channel.Create ());
     WifiHelper wifi = WifiHelper::Default ();
     wifi.SetRemoteStationManager ("ns3::AarfWifiManager");
-
     NqosWifiMacHelper mac = NqosWifiMacHelper::Default ();
     // 3a. Set up MAC for base stations
-    Ssid ssid = Ssid ("ns-3-ssid");
+
+    // 3b. Set up MAC for AP1 & CLient & Server
+
+    Ssid ssid1 = Ssid ("wifi-ap1");
     mac.SetType ("ns3::StaWifiMac",
-                 "Ssid", SsidValue (ssid),
+                 "Ssid", SsidValue (ssid1),
                  "ActiveProbing", BooleanValue (false));
-    NetDeviceContainer staDevices;
-    staDevices = wifi.Install (phy, mac, wifiStaNodes);
-    // 3b. Set up MAC for AP
-    mac.SetType ("ns3::ApWifiMac",
-                 "Ssid", SsidValue (ssid),
-                 "BeaconGeneration", BooleanValue (true),
-                 "BeaconInterval", TimeValue (Seconds (5)));
+    NetDeviceContainer staDevices1;
+    staDevices1 = wifi.Install(phy, mac, wifiStaNodes);
+
     NetDeviceContainer apDevice;
-    apDevice = wifi.Install (phy, mac, wifiApNode);
+    mac.SetType("ns3::ApWifiMac",
+            "Ssid",SsidValue(ssid1));
+    apDevice= wifi.Install(phy,mac,wifiApNode);
+
+    // 3b. Set up MAC for AP2
+
     // 4. Set mobility of the nodes
     MobilityHelper mobility;
 
     Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
-    //positionAlloc->Add (Vector (-100.0, 100.0, 0.0));//0-->AP1
-    positionAlloc->Add (Vector (100.0, 100.0, 0.0));//0-->AP2
-    positionAlloc->Add (Vector (115.0, 0.0, 0.0));//1-->client
-    positionAlloc->Add (Vector (110.0, 0.0, 0.0));//2-->Server
+    positionAlloc->Add (Vector (-100.0, 0, 0.0));//0-->AP1
+    positionAlloc->Add (Vector (100.0, 0, 0.0));//0-->AP2
+    positionAlloc->Add (Vector (-115.0, 0.0, 0.0));//1-->client
+    positionAlloc->Add (Vector (-110.0, 0.0, 0.0));//2-->Server
     //positionAlloc->Add (Vector (0.0, 115.0, 0.0));//3
     //positionAlloc->Add (Vector (0.0, -150.0, 0.0));//4
     mobility.SetPositionAllocator (positionAlloc);
@@ -142,10 +145,9 @@ main (int argc, char *argv[])
     mobility.Install (wifiStaNodes);
 
     // node 1 comes in the communication range of both
-    //Simulator::Schedule (Seconds (2.0), &SetPosition, wifiStaNodes.Get (0), 100.0);
-
+    Simulator::Schedule (Seconds (10.0), &SetPosition, wifiStaNodes.Get (1), 110.0);
     // node 1 goes out of the communication range of both
-    Simulator::Schedule (Seconds (10.0), &SetPosition, wifiStaNodes.Get (0), -115.0);
+    Simulator::Schedule (Seconds (10.0), &SetPosition, wifiStaNodes.Get (0), 115.0);
     // 5.Add Internet layers stack
     InternetStackHelper stack;
     stack.Install (wifiStaNodes);
@@ -155,13 +157,13 @@ main (int argc, char *argv[])
     Ipv4InterfaceContainer wifiInterfaces;
     address.SetBase ("10.1.1.0", "255.255.255.0");
 
-    wifiInterfaces = address.Assign(staDevices);
+    wifiInterfaces = address.Assign(staDevices1);
     address.Assign(apDevice);
     // 7a. Create and setup applications (traffic sink)
     UdpEchoServerHelper echoServer (9); // Port # 9
     ApplicationContainer serverApps = echoServer.Install (wifiStaNodes.Get(1));
     serverApps.Start (Seconds (1.0));
-    serverApps.Stop (Seconds (20.0));
+    serverApps.Stop (Seconds (40.0));
 
 //    UdpEchoServerHelper echoServer1 (10); // Port # 10
 //    ApplicationContainer serverApps1 = echoServer1.Install (wifiStaNodes.Get(3));
@@ -170,25 +172,20 @@ main (int argc, char *argv[])
 
     // 7b. Create and setup applications (traffic source)
     UdpEchoClientHelper echoClient (wifiInterfaces.GetAddress (1), 9);
-    echoClient.SetAttribute ("MaxPackets", UintegerValue (15));
+    echoClient.SetAttribute ("MaxPackets", UintegerValue (50));
     echoClient.SetAttribute ("Interval", TimeValue (Seconds (1.0)));
     echoClient.SetAttribute ("PacketSize", UintegerValue (1024));
 
-//    UdpEchoClientHelper echoClient1 (wifiInterfaces.GetAddress (3), 10);
-//    echoClient1.SetAttribute ("MaxPackets", UintegerValue (1));
-//    echoClient1.SetAttribute ("Interval", TimeValue (Seconds (1.0)));
-//    echoClient1.SetAttribute ("PacketSize", UintegerValue (1024));
-
     ApplicationContainer clientApps = echoClient.Install (wifiStaNodes.Get (0));
     clientApps.Start (Seconds (2.0));
-    clientApps.Stop (Seconds (19.0));
+    clientApps.Stop (Seconds (39.0));
 
 //    ApplicationContainer clientApps1 = echoClient1.Install (wifiStaNodes.Get (2));
 //    clientApps1.Start (Seconds (7.0));
 //    clientApps1.Stop (Seconds (8.0));
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
-    Simulator::Stop (Seconds (20.0));
+    Simulator::Stop (Seconds (40.0));
     // 8. Enable tracing (optional)
     phy.EnablePcapAll ("wifi-2-nodes-fixed", true);
 
