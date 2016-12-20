@@ -44,132 +44,122 @@
 
 using namespace ns3;
 
-static void
-SetPosition (Ptr<Node> node, double x)
-{
-  Ptr<MobilityModel> mobility = node->GetObject<MobilityModel> ();
-  Vector pos = mobility->GetPosition();
-  pos.x = x;
-  mobility->SetPosition(pos);
-}
+//static void
+//SetPosition (Ptr<Node> node, double x)
+//{
+//    Ptr<MobilityModel> mobility = node->GetObject<MobilityModel> ();
+//    Vector pos = mobility->GetPosition();
+//    pos.x = x;
+//    mobility->SetPosition(pos);
+//}
 NS_LOG_COMPONENT_DEFINE ("ThirdScriptExample");
 
 int
 main (int argc, char *argv[])
 {
-    uint32_t maxBytes = 1024;
+    uint32_t maxBytes = 1024*1024;
     //uint32_t nCsma = 1; //only  n2  exist
 
-    uint32_t nWifi = 1;
+    uint32_t nWifi = 20;
     std::string phyMode ("DsssRate1Mbps");
 
 
     // Check for valid number of csma or wifi nodes
     // 250 should be enough, otherwise IP addresses
     // soon become an issue
-    if (nWifi > 15 )
+    if (nWifi > 150 )
     {
-        std::cout << "Too many wifi or csma nodes, no more than 250 each." << std::endl;
+        std::cout << "Too many wifi or csma nodes, no more than 15 each." << std::endl;
         return 1;
     }
 
-
     LogComponentEnable ("PacketSink", LOG_LEVEL_ALL);
 
-    NodeContainer AP_FTP_Nodes;
-    AP_FTP_Nodes.Create (2);
-
+    NodeContainer FTP_NODE;
+    FTP_NODE.Create(1);
     NodeContainer wifiStaNodes;
     wifiStaNodes.Create (nWifi);
-    NodeContainer wifiApNode = AP_FTP_Nodes.Get (0);
 
-    // Set up WiFi
-    WifiHelper wifi;
+    NodeContainer wifiApNode;
+    wifiApNode.Create(1);
 
-    YansWifiPhyHelper wifiPhy =  YansWifiPhyHelper::Default ();
-    wifiPhy.SetPcapDataLinkType (YansWifiPhyHelper::DLT_IEEE802_11);
-
-    YansWifiChannelHelper wifiChannel ;
-    wifiChannel.SetPropagationDelay ("ns3::ConstantSpeedPropagationDelayModel");
-    wifiChannel.AddPropagationLoss ("ns3::TwoRayGroundPropagationLossModel",
-                                      "SystemLoss", DoubleValue(1),
-                                      "HeightAboveZ", DoubleValue(1.5));
-
-    // For range near 250m
-    wifiPhy.Set ("TxPowerStart", DoubleValue(33));
-    wifiPhy.Set ("TxPowerEnd", DoubleValue(33));
-    wifiPhy.Set ("TxPowerLevels", UintegerValue(1));
-    wifiPhy.Set ("TxGain", DoubleValue(0));
-    wifiPhy.Set ("RxGain", DoubleValue(0));
-    wifiPhy.Set ("EnergyDetectionThreshold", DoubleValue(-61.8));
-    wifiPhy.Set ("CcaMode1Threshold", DoubleValue(-64.8));
-
-
-    wifiPhy.SetChannel (wifiChannel.Create ());
+    YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
+    YansWifiPhyHelper phy = YansWifiPhyHelper::Default ();
+    phy.SetChannel (channel.Create ());
+    WifiHelper wifi;// = WifiHelper::Default ();
+    wifi.SetRemoteStationManager ("ns3::AarfWifiManager");
+    NqosWifiMacHelper mac = NqosWifiMacHelper::Default ();
 
     // Add a non-QoS upper mac
-    NqosWifiMacHelper wifiMac = NqosWifiMacHelper::Default ();
-    wifiMac.SetType ("ns3::AdhocWifiMac");
 
-    // Set 802.11b standard
-    wifi.SetStandard (WIFI_PHY_STANDARD_80211b);
-
-    wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
-                                  "DataMode",StringValue(phyMode),
-                                  "ControlMode",StringValue(phyMode));
+    Ssid ssid1 = Ssid ("wifi-ap1");
+    mac.SetType ("ns3::StaWifiMac",
+            "Ssid", SsidValue (ssid1),
+            "ActiveProbing", BooleanValue (false));
 
     NetDeviceContainer staDevices;
-    staDevices = wifi.Install (wifiPhy, wifiMac, wifiStaNodes);
+    staDevices = wifi.Install(phy, mac, wifiStaNodes);
 
 
+    //QosWifiMacHelper wifiMacHelper = QosWifiMacHelper::Default ();
+    mac.SetType ("ns3::ApWifiMac",
+            "Ssid", SsidValue (ssid1),
+            "BeaconGeneration", BooleanValue (true),
+            "BeaconInterval", TimeValue (Seconds (2.5)));
+    //    mac.SetType("ns3::ApWifiMac",
+    //            "Ssid",SsidValue(ssid1));
     NetDeviceContainer apDevices;
-    apDevices = wifi.Install (wifiPhy, wifiMac, wifiApNode);
+
+    apDevices = wifi.Install(phy,mac,wifiApNode.Get(0));
+    //phy.SetChannel (channel.Create ());
+    //apDevices.Add(wifi.Install(phy,mac,wifiApNode.Get(1)));
 
     MobilityHelper mobility;
+
+    mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
+            "MinX", DoubleValue (0.0),
+            "MinY", DoubleValue (0.0),
+            "DeltaX", DoubleValue (5.0),
+            "DeltaY", DoubleValue (10.0),
+            "GridWidth", UintegerValue (30),
+            "LayoutType", StringValue ("RowFirst"));
+
+    mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
+            "Bounds", RectangleValue (Rectangle (-150, 150, -150, 150)));
+    mobility.Install (wifiStaNodes);
+
     mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-    mobility.Install (wifiApNode);
-
-    MobilityHelper mobilityUser;
-    Ptr<ListPositionAllocator> positionAlloc = CreateObject <ListPositionAllocator>();
-    positionAlloc ->Add(Vector(1000000000, 0, 0)); // node1 -- starting very far away
-    mobilityUser.SetPositionAllocator(positionAlloc);
-    mobilityUser.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    mobilityUser.Install(wifiStaNodes);
-
+    mobility.Install (wifiApNode.Get(0));
 
     // node 1 comes in the communication range of both
-    Simulator::Schedule (Seconds (4.0), &SetPosition, wifiStaNodes.Get (0), 200.0);
+    //    Simulator::Schedule (Seconds (4.0), &SetPosition, wifiStaNodes.Get (0), 200.0);
 
     // node 1 goes out of the communication range of both
-    Simulator::Schedule (Seconds (7.0), &SetPosition, wifiStaNodes.Get (0), 1000.0);
-
+    //Simulator::Schedule (Seconds (4.0), &SetPosition, wifiStaNodes.Get (0), 115.0);
 
     //////////////////TOP LAN////////////////////
     Ptr<Node> n2 = CreateObject<Node> ();//acts as a router
-
-
     Ptr<Node> bridge1 = CreateObject<Node> ();
     Ptr<Node> bridge2 = CreateObject<Node> ();
 
     CsmaHelper csma;
-    csma.SetChannelAttribute ("DataRate", StringValue ("5Mbps"));
+    csma.SetChannelAttribute ("DataRate", StringValue ("2Mbps"));
     csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (2)));
 
     NetDeviceContainer topLanDevices;
     NetDeviceContainer topBridgeDevices;
     // It is easier to iterate the nodes in C++ if we put them into a container
-    NodeContainer topLan (n2);
-    topLan.Add(AP_FTP_Nodes.Get(0));
-    topLan.Add(wifiStaNodes);
+    NodeContainer topLan;
+    topLan.Add(n2);
+    topLan.Add(wifiApNode);
 
-
-    for (uint32_t i = 0; i < (nWifi+2); i++)
-      {
+    for (uint32_t i = 0; i < 2; i++) //TODO make this constant
+    {
         // install a csma channel between the ith toplan node and the bridge node
         NetDeviceContainer link = csma.Install (NodeContainer (topLan.Get (i), bridge1));
         topLanDevices.Add (link.Get (0));
         topBridgeDevices.Add (link.Get (1));
-      }
+    }
 
     //
     // Now, Create the bridge netdevice, which will do the packet switching.  The
@@ -179,33 +169,41 @@ main (int argc, char *argv[])
     BridgeHelper bridge;
     bridge.Install (bridge1, topBridgeDevices);
 
-//TODO change here, add
+    //TODO change here, add
     InternetStackHelper stack;
 
-    stack.Install (AP_FTP_Nodes);
-
+    stack.Install (wifiApNode);
+    stack.Install(FTP_NODE);
     stack.Install (wifiStaNodes);
     stack.Install(n2);
 
 
+    NetDeviceContainer topLanDevices1;
+    topLanDevices1.Add(staDevices);
+    topLanDevices1.Add(apDevices);
 
-/////////////BOTTOM LAN??????????????
+
+    /////BOTTOM LAN/////////////////
     NetDeviceContainer bottomLanDevices;
     NetDeviceContainer bottomBridgeDevices;
     NodeContainer bottomLan (n2);
-    bottomLan.Add(AP_FTP_Nodes.Get(1));
+    bottomLan.Add(FTP_NODE.Get(0));
     for (int i = 0; i < 2; i++)
-      {
+    {
         NetDeviceContainer link = csma.Install (NodeContainer (bottomLan.Get (i), bridge2));
         bottomLanDevices.Add (link.Get (0));
         bottomBridgeDevices.Add (link.Get (1));
-      }
+    }
     bridge.Install (bridge2, bottomBridgeDevices);
 
     Ipv4AddressHelper address;
     address.SetBase ("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer APInterfaces;
     APInterfaces = address.Assign (topLanDevices);
+
+    Ipv4InterfaceContainer wifiClients;
+    address.SetBase ("10.1.2.0", "255.255.255.0");
+    wifiClients = address.Assign (topLanDevices1);
 
     address.SetBase ("10.1.3.0", "255.255.255.0");
     Ipv4InterfaceContainer bottomInterfaces;
@@ -219,15 +217,15 @@ main (int argc, char *argv[])
     std::cout<<"FTP_SERVER_IP: "<<bottomInterfaces.GetAddress(1)<<"\n";
     for(uint32_t i=0;i<nWifi;i++)
     {
-        BulkSendHelper source("ns3::TcpSocketFactory", InetSocketAddress(APInterfaces.GetAddress(i+2), port));
+        BulkSendHelper source("ns3::TcpSocketFactory", InetSocketAddress(wifiClients.GetAddress(i), port));
         // Set the amount of data to send in bytes.  Zero is unlimited.
         source.SetAttribute("MaxBytes", UintegerValue(maxBytes));
-        ApplicationContainer sourceApps = source.Install(AP_FTP_Nodes.Get(1));
+        ApplicationContainer sourceApps = source.Install(FTP_NODE.Get(0));
 
         sourceApps.Start(Seconds(0.0));
         sourceApps.Stop(Seconds(10.0));
 
-        std::cout<<"CLIENT_IP: "<<APInterfaces.GetAddress(i+2)<<"\n";
+        std::cout<<"CLIENT_IP: "<<wifiClients.GetAddress(i)<<"\n";
         PacketSinkHelper sink("ns3::TcpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
         ApplicationContainer sinkApps = sink.Install(wifiStaNodes.Get(i));
         sinkApps.Start(Seconds(0.0));
@@ -240,6 +238,8 @@ main (int argc, char *argv[])
     FlowMonitorHelper flowmon;
     Ptr<FlowMonitor> monitor = flowmon.InstallAll();
     Simulator::Stop (Seconds (10.0));
+
+    phy.EnablePcapAll ("trace", true);
     Simulator::Run ();
 
     // 10. Print per flow statistics
@@ -264,7 +264,7 @@ main (int argc, char *argv[])
                         - i->second.timeFirstRxPacket.GetSeconds()) / 1024 << " Kbps \n";
         std::cout << "  Delay:      " << i->second.delaySum / i->second.rxPackets  <<"\n";
     }
-    monitor->SerializeToXmlFile("Project6461.xml", true, true);
+    monitor->SerializeToXmlFile("Simulation_Data.xml", true, true);
     Simulator::Destroy ();
     return 0;
 }
